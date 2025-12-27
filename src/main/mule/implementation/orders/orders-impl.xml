@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ============================================== -->
+    <!-- CREATE ORDER IMPLEMENTATION                    -->
+    <!-- Salesforce -> NetSuite Order Creation          -->
+    <!-- ============================================== -->
+    <flow name="create-order-impl" doc:name="Create Order Implementation">
+        <logger level="INFO" doc:name="Log Start" 
+            message="#['CREATE ORDER | Start | SalesforceOrderId: ' ++ (payload.salesforceOrderId default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId]"/>
+        
+        <!-- Store original payload -->
+        <set-variable variableName="originalOrder" value="#[payload]" doc:name="Store Original Order"/>
+        <set-variable variableName="salesforceOrderId" value="#[payload.salesforceOrderId]" doc:name="Store SF Order ID"/>
+        
+        <!-- Check for idempotency -->
+        <set-variable variableName="idempotencyKey" value="#['ORDER_' ++ payload.salesforceOrderId]" doc:name="Set Idempotency Key"/>
+        <flow-ref name="check-idempotency" doc:name="Check Idempotency"/>
+        
+        <choice doc:name="Is Duplicate Order?">
+            <when expression="#[vars.isDuplicate]">
+                <!-- Return existing order response -->
+                <flow-ref name="retrieve-order-id-mapping" doc:name="Retrieve Existing Mapping"/>
+                <ee:transform doc:name="Build Duplicate Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    netsuiteOrderId: vars.netsuiteOrderId default "UNKNOWN",
+    status: "ALREADY_EXISTS",
+    message: "Order already processed"
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+                <set-variable variableName="httpStatus" value="200" doc:name="Set HTTP Status 200"/>
+            </when>
+            <otherwise>
+                <!-- Process new order -->
+                <flow-ref name="create-order-in-netsuite" doc:name="Create Order in NetSuite"/>
+            </otherwise>
+        </choice>
+        
+        <logger level="INFO" doc:name="Log End" 
+            message="#['CREATE ORDER | End | Status: ' ++ (vars.httpStatus default '201') ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </flow>
+
+    <!-- ============================================== -->
+    <!-- CREATE ORDER IN NETSUITE SUB-FLOW              -->
+    <!-- ============================================== -->
+    <sub-flow name="create-order-in-netsuite" doc:name="Create Order in NetSuite">
+        <!-- Set logging variables -->
+        <set-variable variableName="targetSystem" value="NetSuite" doc:name="Set Target System"/>
+        <set-variable variableName="operation" value="CreateOrder" doc:name="Set Operation"/>
+        <flow-ref name="log-external-call-start" doc:name="Log Call Start"/>
+        
+        <!-- Transform to NetSuite format -->
+        <ee:transform doc:name="Transform to NetSuite Format">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var order = vars.originalOrder
+---
+{
+    externalId: order.salesforceOrderId,
+    entity: {
+        internalId: order.customerId
+    },
+    tranDate: order.orderDate as String {format: "yyyy-MM-dd"},
+    status: order.status,
+    currency: {
+        name: order.currency
+    },
+    itemList: {
+        item: order.items map (item) -> {
+            item: {
+                internalId: item.productCode
+            },
+            quantity: item.quantity,
+            rate: item.unitPrice
+        }
+    },
+    shippingAddress: {
+        addr1: order.shippingAddress.street,
+        city: order.shippingAddress.city,
+        state: order.shippingAddress.state,
+        zip: order.shippingAddress.postalCode,
+        country: order.shippingAddress.country
+    },
+    billingAddress: {
+        addr1: order.billingAddress.street,
+        city: order.billingAddress.city,
+        state: order.billingAddress.state,
+        zip: order.billingAddress.postalCode,
+        country: order.billingAddress.country
+    }
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <!-- Call NetSuite API -->
+        <try doc:name="Try NetSuite Call">
+            <http:request method="POST" 
+                config-ref="HTTP_Request_Config_NetSuite" 
+                path="${netsuite.api.basePath}/salesOrder"
+                doc:name="Create Order in NetSuite">
+                <http:headers><![CDATA[#[{
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " ++ p('secure::netsuite.credentials.tokenSecret'),
+                    "X-Correlation-Id": correlationId
+                }]]]></http:headers>
+            </http:request>
+            
+            <!-- Store NetSuite Order ID -->
+            <set-variable variableName="netsuiteOrderId" value="#[payload.internalId default payload.id]" doc:name="Store NS Order ID"/>
+            <set-variable variableName="callStatus" value="SUCCESS" doc:name="Set Call Status"/>
+            
+            <!-- Store ID mapping -->
+            <flow-ref name="store-order-id-mapping" doc:name="Store ID Mapping"/>
+            
+            <!-- Build success response -->
+            <ee:transform doc:name="Build Success Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    netsuiteOrderId: vars.netsuiteOrderId,
+    status: "CREATED",
+    message: "Order successfully created in NetSuite"
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <set-variable variableName="httpStatus" value="201" doc:name="Set HTTP Status 201"/>
+            
+            <error-handler>
+                <on-error-propagate type="HTTP:BAD_REQUEST" doc:name="Handle Bad Request">
+                    <set-variable variableName="callStatus" value="FAILED" doc:name="Set Call Status"/>
+                    <set-variable variableName="httpStatus" value="400" doc:name="Set HTTP Status 400"/>
+                    <ee:transform doc:name="Build Error Response">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: "BAD_REQUEST",
+    message: "Invalid order data - " ++ (error.description default "Validation failed"),
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                </on-error-propagate>
+                <on-error-propagate type="ANY" doc:name="Handle Any Error">
+                    <set-variable variableName="callStatus" value="FAILED" doc:name="Set Call Status"/>
+                    <set-variable variableName="httpStatus" value="500" doc:name="Set HTTP Status 500"/>
+                    <ee:transform doc:name="Build Error Response">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: "INTERNAL_SERVER_ERROR",
+    message: "Failed to create order in NetSuite - " ++ (error.description default "Unknown error"),
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                </on-error-propagate>
+            </error-handler>
+        </try>
+        
+        <flow-ref name="log-external-call-end" doc:name="Log Call End"/>
+    </sub-flow>
+
+    <!-- ============================================== -->
+    <!-- GET ORDER STATUS IMPLEMENTATION                -->
+    <!-- Retrieve Order Status from NetSuite            -->
+    <!-- ============================================== -->
+    <flow name="get-order-status-impl" doc:name="Get Order Status Implementation">
+        <logger level="INFO" doc:name="Log Start" 
+            message="#['GET ORDER STATUS | Start | OrderId: ' ++ (attributes.uriParams.orderId default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId]"/>
+        
+        <!-- Store order ID -->
+        <set-variable variableName="orderId" value="#[attributes.uriParams.orderId]" doc:name="Store Order ID"/>
+        <set-variable variableName="targetSystem" value="NetSuite" doc:name="Set Target System"/>
+        <set-variable variableName="operation" value="GetOrderStatus" doc:name="Set Operation"/>
+        
+        <flow-ref name="log-external-call-start" doc:name="Log Call Start"/>
+        
+        <!-- Call NetSuite to get order -->
+        <try doc:name="Try NetSuite Call">
+            <http:request method="GET" 
+                config-ref="HTTP_Request_Config_NetSuite" 
+                path="#['${netsuite.api.basePath}/salesOrder/' ++ vars.orderId]"
+                doc:name="Get Order from NetSuite">
+                <http:headers><![CDATA[#[{
+                    "Accept": "application/json",
+                    "Authorization": "Bearer " ++ p('secure::netsuite.credentials.tokenSecret'),
+                    "X-Correlation-Id": correlationId
+                }]]]></http:headers>
+            </http:request>
+            
+            <set-variable variableName="callStatus" value="SUCCESS" doc:name="Set Call Status"/>
+            
+            <!-- Transform NetSuite response to API format -->
+            <ee:transform doc:name="Transform to API Format">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var nsOrder = payload
+---
+{
+    orderId: nsOrder.internalId default nsOrder.id,
+    salesforceOrderId: nsOrder.externalId default "",
+    customerId: nsOrder.entity.internalId default "",
+    orderDate: nsOrder.tranDate,
+    status: nsOrder.status default "UNKNOWN",
+    currency: nsOrder.currency.name default "USD",
+    totalAmount: nsOrder.total default 0,
+    items: (nsOrder.itemList.item default []) map (item) -> {
+        productCode: item.item.internalId default "",
+        quantity: item.quantity default 0,
+        unitPrice: item.rate default 0
+    },
+    shippingAddress: {
+        street: nsOrder.shippingAddress.addr1 default "",
+        city: nsOrder.shippingAddress.city default "",
+        state: nsOrder.shippingAddress.state default "",
+        postalCode: nsOrder.shippingAddress.zip default "",
+        country: nsOrder.shippingAddress.country default ""
+    },
+    billingAddress: {
+        street: nsOrder.billingAddress.addr1 default "",
+        city: nsOrder.billingAddress.city default "",
+        state: nsOrder.billingAddress.state default "",
+        postalCode: nsOrder.billingAddress.zip default "",
+        country: nsOrder.billingAddress.country default ""
+    }
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <set-variable variableName="httpStatus" value="200" doc:name="Set HTTP Status 200"/>
+            
+            <error-handler>
+                <on-error-propagate type="HTTP:NOT_FOUND" doc:name="Handle Not Found">
+                    <set-variable variableName="callStatus" value="NOT_FOUND" doc:name="Set Call Status"/>
+                    <set-variable variableName="httpStatus" value="404" doc:name="Set HTTP Status 404"/>
+                    <ee:transform doc:name="Build Not Found Response">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: "NOT_FOUND",
+    message: "Order not found with ID: " ++ vars.orderId,
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                </on-error-propagate>
+                <on-error-propagate type="ANY" doc:name="Handle Any Error">
+                    <set-variable variableName="callStatus" value="FAILED" doc:name="Set Call Status"/>
+                    <set-variable variableName="httpStatus" value="500" doc:name="Set HTTP Status 500"/>
+                    <ee:transform doc:name="Build Error Response">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: "INTERNAL_SERVER_ERROR",
+    message: "Failed to retrieve order from NetSuite - " ++ (error.description default "Unknown error"),
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                </on-error-propagate>
+            </error-handler>
+        </try>
+        
+        <flow-ref name="log-external-call-end" doc:name="Log Call End"/>
+        
+        <logger level="INFO" doc:name="Log End" 
+            message="#['GET ORDER STATUS | End | Status: ' ++ (vars.httpStatus default '200') ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </flow>
+
+</mule>

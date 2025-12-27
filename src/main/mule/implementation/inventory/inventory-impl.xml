@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ============================================== -->
+    <!-- GET INVENTORY IMPLEMENTATION                   -->
+    <!-- Retrieve Inventory Levels from NetSuite        -->
+    <!-- ============================================== -->
+    <flow name="get-inventory-impl" doc:name="Get Inventory Implementation">
+        <logger level="INFO" doc:name="Log Start" 
+            message="#['GET INVENTORY | Start | ProductCode: ' ++ (attributes.queryParams.productCode default 'ALL') ++ ' | Location: ' ++ (attributes.queryParams.location default 'ALL') ++ ' | CorrelationId: ' ++ correlationId]"/>
+        
+        <!-- Store query parameters -->
+        <set-variable variableName="productCode" value="#[attributes.queryParams.productCode default '']" doc:name="Store Product Code"/>
+        <set-variable variableName="location" value="#[attributes.queryParams.location default '']" doc:name="Store Location"/>
+        <set-variable variableName="targetSystem" value="NetSuite" doc:name="Set Target System"/>
+        <set-variable variableName="operation" value="GetInventory" doc:name="Set Operation"/>
+        
+        <flow-ref name="log-external-call-start" doc:name="Log Call Start"/>
+        
+        <!-- Build query parameters -->
+        <ee:transform doc:name="Build Query Params">
+            <ee:message>
+                <ee:set-attributes><![CDATA[%dw 2.0
+output application/java
+---
+{
+    queryParams: {
+        (productCode: vars.productCode) if !isEmpty(vars.productCode),
+        (location: vars.location) if !isEmpty(vars.location)
+    }
+}]]></ee:set-attributes>
+            </ee:message>
+        </ee:transform>
+        
+        <!-- Call NetSuite to get inventory -->
+        <try doc:name="Try NetSuite Call">
+            <http:request method="GET" 
+                config-ref="HTTP_Request_Config_NetSuite" 
+                path="${netsuite.api.basePath}/inventoryItem"
+                doc:name="Get Inventory from NetSuite">
+                <http:headers><![CDATA[#[{
+                    "Accept": "application/json",
+                    "Authorization": "Bearer " ++ p('secure::netsuite.credentials.tokenSecret'),
+                    "X-Correlation-Id": correlationId
+                }]]]></http:headers>
+                <http:query-params><![CDATA[#[attributes.queryParams]]]></http:query-params>
+            </http:request>
+            
+            <set-variable variableName="callStatus" value="SUCCESS" doc:name="Set Call Status"/>
+            
+            <!-- Transform NetSuite response to API format -->
+            <ee:transform doc:name="Transform to API Format">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var items = if (payload is Array) payload else [payload]
+---
+items map (item) -> {
+    productCode: item.itemId default item.internalId default "",
+    location: item.location.name default item.locationId default "",
+    availableQuantity: item.quantityAvailable default item.quantity default 0,
+    lastUpdated: item.lastModifiedDate default now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <set-variable variableName="httpStatus" value="200" doc:name="Set HTTP Status 200"/>
+            
+            <error-handler>
+                <on-error-propagate type="ANY" doc:name="Handle Any Error">
+                    <set-variable variableName="callStatus" value="FAILED" doc:name="Set Call Status"/>
+                    <set-variable variableName="httpStatus" value="500" doc:name="Set HTTP Status 500"/>
+                    <ee:transform doc:name="Build Error Response">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: "INTERNAL_SERVER_ERROR",
+    message: "Failed to retrieve inventory from NetSuite - " ++ (error.description default "Unknown error"),
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                </on-error-propagate>
+            </error-handler>
+        </try>
+        
+        <flow-ref name="log-external-call-end" doc:name="Log Call End"/>
+        
+        <logger level="INFO" doc:name="Log End" 
+            message="#['GET INVENTORY | End | Status: ' ++ (vars.httpStatus default '200') ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </flow>
+
+    <!-- ============================================== -->
+    <!-- SYNC INVENTORY IMPLEMENTATION                  -->
+    <!-- Push Inventory Updates from NetSuite to SF     -->
+    <!-- ============================================== -->
+    <flow name="sync-inventory-impl" doc:name="Sync Inventory Implementation">
+        <logger level="INFO" doc:name="Log Start" 
+            message="#['SYNC INVENTORY | Start | ItemCount: ' ++ (sizeOf(payload) default 0) ++ ' | CorrelationId: ' ++ correlationId]"/>
+        
+        <!-- Store original payload -->
+        <set-variable variableName="inventoryItems" value="#[payload]" doc:name="Store Inventory Items"/>
+        <set-variable variableName="targetSystem" value="Salesforce" doc:name="Set Target System"/>
+        <set-variable variableName="operation" value="SyncInventory" doc:name="Set Operation"/>
+        
+        <flow-ref name="log-external-call-start" doc:name="Log Call Start"/>
+        
+        <!-- Transform to Salesforce format -->
+        <ee:transform doc:name="Transform to Salesforce Format">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    records: vars.inventoryItems map (item) -> {
+        attributes: {
+            "type": "Product2"
+        },
+        ProductCode: item.productCode,
+        QuantityUnitOfMeasure: item.location,
+        StockKeepingUnit: item.availableQuantity as String,
+        LastModifiedDate: item.lastUpdated
+    }
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <!-- Call Salesforce API to update inventory -->
+        <try doc:name="Try Salesforce Call">
+            <http:request method="PATCH" 
+                config-ref="HTTP_Request_Config_Salesforce" 
+                path="${salesforce.api.basePath}/composite/sobjects"
+                doc:name="Update Inventory in Salesforce">
+                <http:headers><![CDATA[#[{
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " ++ p('secure::salesforce.credentials.securityToken'),
+                    "X-Correlation-Id": correlationId
+                }]]]></http:headers>
+            </http:request>
+            
+            <set-variable variableName="callStatus" value="SUCCESS" doc:name="Set Call Status"/>
+            
+            <!-- Build success response -->
+            <ee:transform doc:name="Build Success Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    updated: true,
+    processedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <set-variable variableName="httpStatus" value="200" doc:name="Set HTTP Status 200"/>
+            
+            <error-handler>
+                <on-error-propagate type="HTTP:BAD_REQUEST" doc:name="Handle Bad Request">
+                    <set-variable variableName="callStatus" value="FAILED" doc:name="Set Call Status"/>
+                    <set-variable variableName="httpStatus" value="400" doc:name="Set HTTP Status 400"/>
+                    <ee:transform doc:name="Build Error Response">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: "BAD_REQUEST",
+    message: "Invalid inventory data - " ++ (error.description default "Validation failed"),
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                </on-error-propagate>
+                <on-error-propagate type="ANY" doc:name="Handle Any Error">
+                    <set-variable variableName="callStatus" value="FAILED" doc:name="Set Call Status"/>
+                    <set-variable variableName="httpStatus" value="500" doc:name="Set HTTP Status 500"/>
+                    <ee:transform doc:name="Build Error Response">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: "INTERNAL_SERVER_ERROR",
+    message: "Failed to sync inventory to Salesforce - " ++ (error.description default "Unknown error"),
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                </on-error-propagate>
+            </error-handler>
+        </try>
+        
+        <flow-ref name="log-external-call-end" doc:name="Log Call End"/>
+        
+        <logger level="INFO" doc:name="Log End" 
+            message="#['SYNC INVENTORY | End | Status: ' ++ (vars.httpStatus default '200') ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </flow>
+
+</mule>

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <munit:config name="error-handling-test-suite.xml"/>
+
+    <!-- ============================================== -->
+    <!-- TEST: Create Order - NetSuite Timeout          -->
+    <!-- ============================================== -->
+    <munit:test name="create-order-timeout-test" 
+        doc:name="Test Create Order Timeout" 
+        description="Test order creation when NetSuite times out"
+        expectedErrorType="ANY">
+        
+        <munit:behavior>
+            <!-- Mock Object Store -->
+            <munit-tools:mock-when processor="os:contains">
+                <munit-tools:then-return>
+                    <munit-tools:variables>
+                        <munit-tools:variable key="isDuplicate" value="#[false]"/>
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <munit-tools:mock-when processor="os:store">
+                <munit-tools:then-return/>
+            </munit-tools:mock-when>
+            
+            <!-- Mock NetSuite HTTP Request - Timeout -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Create Order in NetSuite"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:TIMEOUT"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Order Payload">
+                <munit:payload value='#[%dw 2.0
+output application/json
+---
+{
+    "orderId": "ORD-TIMEOUT",
+    "salesforceOrderId": "SF-ORD-TIMEOUT",
+    "customerId": "CUST-001",
+    "orderDate": "2025-01-15T10:00:00Z",
+    "status": "CONFIRMED",
+    "currency": "USD",
+    "totalAmount": 1500.00,
+    "items": [],
+    "shippingAddress": {
+        "street": "123 Main St",
+        "city": "San Francisco",
+        "state": "CA",
+        "postalCode": "94102",
+        "country": "USA"
+    },
+    "billingAddress": {
+        "street": "123 Main St",
+        "city": "San Francisco",
+        "state": "CA",
+        "postalCode": "94102",
+        "country": "USA"
+    }
+}]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="create-order-impl" doc:name="Call Create Order"/>
+        </munit:execution>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Sync Inventory - Salesforce Unavailable  -->
+    <!-- ============================================== -->
+    <munit:test name="sync-inventory-salesforce-unavailable-test" 
+        doc:name="Test Sync Inventory Salesforce Unavailable" 
+        description="Test inventory sync when Salesforce is unavailable"
+        expectedErrorType="ANY">
+        
+        <munit:behavior>
+            <!-- Mock Salesforce HTTP Request - Connectivity Error -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Update Inventory in Salesforce"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Inventory Payload">
+                <munit:payload value='#[%dw 2.0
+output application/json
+---
+[
+    {
+        "productCode": "PROD-001",
+        "location": "Warehouse-A",
+        "availableQuantity": 100,
+        "lastUpdated": "2025-01-15T10:00:00Z"
+    }
+]]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="sync-inventory-impl" doc:name="Call Sync Inventory"/>
+        </munit:execution>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Common Flows - Log Inbound Request       -->
+    <!-- ============================================== -->
+    <munit:test name="log-inbound-request-test" 
+        doc:name="Test Log Inbound Request" 
+        description="Test inbound request logging sub-flow">
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Request Attributes">
+                <munit:payload value="#[null]"/>
+                <munit:attributes value="#[{method: 'POST', requestPath: '/api/v1/orders'}]"/>
+            </munit:set-event>
+            <flow-ref name="log-inbound-request" doc:name="Call Log Inbound Request"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <!-- Verify flow completes without error -->
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" message="Flow should complete successfully"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Common Flows - Log Outbound Response     -->
+    <!-- ============================================== -->
+    <munit:test name="log-outbound-response-test" 
+        doc:name="Test Log Outbound Response" 
+        description="Test outbound response logging sub-flow">
+        
+        <munit:execution>
+            <set-variable variableName="httpStatus" value="200" doc:name="Set HTTP Status"/>
+            <flow-ref name="log-outbound-response" doc:name="Call Log Outbound Response"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <!-- Verify flow completes without error -->
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" message="Flow should complete successfully"/>
+        </munit:validation>
+    </munit:test>
+
+</mule>

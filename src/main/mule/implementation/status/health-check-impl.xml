@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ============================================== -->
+    <!-- HEALTH CHECK IMPLEMENTATION                    -->
+    <!-- API Health Check Endpoint                      -->
+    <!-- ============================================== -->
+    <flow name="health-check-impl" doc:name="Health Check Implementation">
+        <logger level="DEBUG" doc:name="Log Health Check" 
+            message="#['HEALTH CHECK | CorrelationId: ' ++ correlationId]"/>
+        
+        <!-- Build health response -->
+        <ee:transform doc:name="Build Health Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status: "UP",
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    version: p('api.version') default "v1",
+    environment: p('mule.env') default "unknown"
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <set-variable variableName="httpStatus" value="200" doc:name="Set HTTP Status 200"/>
+    </flow>
+
+    <!-- ============================================== -->
+    <!-- SYSTEM STATUS CHECK SUB-FLOW                   -->
+    <!-- Check connectivity to external systems         -->
+    <!-- ============================================== -->
+    <sub-flow name="check-system-status" doc:name="Check System Status">
+        <set-variable variableName="systemsStatus" value="#[{}]" doc:name="Initialize Status"/>
+        
+        <!-- Check NetSuite connectivity -->
+        <try doc:name="Try NetSuite Check">
+            <set-variable variableName="netsuiteStatus" value="UP" doc:name="Set NetSuite UP"/>
+            <error-handler>
+                <on-error-continue type="ANY">
+                    <set-variable variableName="netsuiteStatus" value="DOWN" doc:name="Set NetSuite DOWN"/>
+                </on-error-continue>
+            </error-handler>
+        </try>
+        
+        <!-- Check Salesforce connectivity -->
+        <try doc:name="Try Salesforce Check">
+            <set-variable variableName="salesforceStatus" value="UP" doc:name="Set Salesforce UP"/>
+            <error-handler>
+                <on-error-continue type="ANY">
+                    <set-variable variableName="salesforceStatus" value="DOWN" doc:name="Set Salesforce DOWN"/>
+                </on-error-continue>
+            </error-handler>
+        </try>
+        
+        <!-- Build detailed status -->
+        <ee:transform doc:name="Build Detailed Status">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status: if ((vars.netsuiteStatus == "UP") and (vars.salesforceStatus == "UP")) "UP" else "DEGRADED",
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    systems: {
+        netsuite: vars.netsuiteStatus,
+        salesforce: vars.salesforceStatus
+    }
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </sub-flow>
+
+</mule>

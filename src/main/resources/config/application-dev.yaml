@@ -1,0 +1,40 @@
+# Application Configuration - Development Environment
+
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8081"
+    basePath: "/api/v1"
+  request:
+    timeout: "30000"
+    retryCount: "3"
+    retryInterval: "2000"
+
+api:
+  id: "12345"
+  name: "netsuite-salesforce-order-inventory-api"
+  version: "v1"
+
+netsuite:
+  api:
+    host: "sandbox.netsuite.com"
+    port: "443"
+    basePath: "/rest/v1"
+    protocol: "HTTPS"
+
+salesforce:
+  api:
+    host: "test.salesforce.com"
+    port: "443"
+    basePath: "/services/data/v58.0"
+    protocol: "HTTPS"
+
+objectstore:
+  idMapping:
+    entryTtl: "24"
+    entryTtlUnit: "HOURS"
+    maxEntries: "10000"
+
+logging:
+  level: "DEBUG"
+  maskFields: "password,secret,token,authorization"

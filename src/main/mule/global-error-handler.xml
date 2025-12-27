@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ============================================== -->
+    <!-- GLOBAL ERROR HANDLER                           -->
+    <!-- Handles all error types with standard response -->
+    <!-- ============================================== -->
+    <error-handler name="global-error-handler" doc:name="Global Error Handler">
+        
+        <!-- BAD REQUEST - 400 -->
+        <on-error-propagate type="APIKIT:BAD_REQUEST, EXPRESSION, MULE:EXPRESSION" doc:name="Bad Request">
+            <set-variable variableName="httpStatus" value="400" doc:name="Set HTTP Status 400"/>
+            <set-variable variableName="errorCode" value="BAD_REQUEST" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: error.description default "Bad request - Invalid input data",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="ERROR" doc:name="Log Error" 
+                message="#['Error: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | Message: ' ++ (error.description default 'Unknown error')]"/>
+        </on-error-propagate>
+
+        <!-- UNAUTHORIZED - 401 -->
+        <on-error-propagate type="APIKIT:UNAUTHORIZED, HTTP:UNAUTHORIZED, CLIENT-SECURITY" doc:name="Unauthorized">
+            <set-variable variableName="httpStatus" value="401" doc:name="Set HTTP Status 401"/>
+            <set-variable variableName="errorCode" value="UNAUTHORIZED" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: "Unauthorized - Invalid or missing credentials",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="ERROR" doc:name="Log Error" 
+                message="#['Error: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | Message: Unauthorized access attempt']"/>
+        </on-error-propagate>
+
+        <!-- FORBIDDEN - 403 -->
+        <on-error-propagate type="HTTP:FORBIDDEN" doc:name="Forbidden">
+            <set-variable variableName="httpStatus" value="403" doc:name="Set HTTP Status 403"/>
+            <set-variable variableName="errorCode" value="FORBIDDEN" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: "Forbidden - Access denied to the requested resource",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="ERROR" doc:name="Log Error" 
+                message="#['Error: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | Message: Forbidden access']"/>
+        </on-error-propagate>
+
+        <!-- NOT FOUND - 404 -->
+        <on-error-propagate type="APIKIT:NOT_FOUND, HTTP:NOT_FOUND" doc:name="Not Found">
+            <set-variable variableName="httpStatus" value="404" doc:name="Set HTTP Status 404"/>
+            <set-variable variableName="errorCode" value="NOT_FOUND" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: error.description default "Resource not found",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="WARN" doc:name="Log Warning" 
+                message="#['Warning: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | Message: ' ++ (error.description default 'Resource not found')]"/>
+        </on-error-propagate>
+
+        <!-- METHOD NOT ALLOWED - 405 -->
+        <on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED" doc:name="Method Not Allowed">
+            <set-variable variableName="httpStatus" value="405" doc:name="Set HTTP Status 405"/>
+            <set-variable variableName="errorCode" value="METHOD_NOT_ALLOWED" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: "Method not allowed for this resource",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="WARN" doc:name="Log Warning" 
+                message="#['Warning: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | Message: Method not allowed']"/>
+        </on-error-propagate>
+
+        <!-- UNSUPPORTED MEDIA TYPE - 415 -->
+        <on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE" doc:name="Unsupported Media Type">
+            <set-variable variableName="httpStatus" value="415" doc:name="Set HTTP Status 415"/>
+            <set-variable variableName="errorCode" value="UNSUPPORTED_MEDIA_TYPE" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: "Unsupported media type",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="WARN" doc:name="Log Warning" 
+                message="#['Warning: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | Message: Unsupported media type']"/>
+        </on-error-propagate>
+
+        <!-- NOT ACCEPTABLE - 406 -->
+        <on-error-propagate type="APIKIT:NOT_ACCEPTABLE" doc:name="Not Acceptable">
+            <set-variable variableName="httpStatus" value="406" doc:name="Set HTTP Status 406"/>
+            <set-variable variableName="errorCode" value="NOT_ACCEPTABLE" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: "Not acceptable - Requested format not supported",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="WARN" doc:name="Log Warning" 
+                message="#['Warning: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | Message: Not acceptable']"/>
+        </on-error-propagate>
+
+        <!-- BAD GATEWAY - 502 -->
+        <on-error-propagate type="HTTP:BAD_GATEWAY" doc:name="Bad Gateway">
+            <set-variable variableName="httpStatus" value="502" doc:name="Set HTTP Status 502"/>
+            <set-variable variableName="errorCode" value="BAD_GATEWAY" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: "Bad gateway - Invalid response from upstream server",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="ERROR" doc:name="Log Error" 
+                message="#['Error: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | Message: Bad gateway']"/>
+        </on-error-propagate>
+
+        <!-- GATEWAY TIMEOUT - 504 -->
+        <on-error-propagate type="HTTP:TIMEOUT, HTTP:CONNECTIVITY" doc:name="Gateway Timeout">
+            <set-variable variableName="httpStatus" value="504" doc:name="Set HTTP Status 504"/>
+            <set-variable variableName="errorCode" value="GATEWAY_TIMEOUT" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: "Gateway timeout - Upstream server did not respond in time",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="ERROR" doc:name="Log Error" 
+                message="#['Error: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | Message: Gateway timeout']"/>
+        </on-error-propagate>
+
+        <!-- INTERNAL SERVER ERROR - 500 (Catch All) -->
+        <on-error-propagate type="ANY" doc:name="Internal Server Error">
+            <set-variable variableName="httpStatus" value="500" doc:name="Set HTTP Status 500"/>
+            <set-variable variableName="errorCode" value="INTERNAL_SERVER_ERROR" doc:name="Set Error Code"/>
+            <ee:transform doc:name="Build Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    errorCode: vars.errorCode,
+    message: "Internal server error - An unexpected error occurred",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            <logger level="ERROR" doc:name="Log Error" 
+                message="#['Error: ' ++ (vars.errorCode default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId ++ ' | ErrorType: ' ++ (error.'type' as String default 'UNKNOWN') ++ ' | Message: ' ++ (error.description default 'Unknown error')]"/>
+        </on-error-propagate>
+
+    </error-handler>
+
+</mule>

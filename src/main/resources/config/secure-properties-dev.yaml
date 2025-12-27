@@ -1,0 +1,25 @@
+# Secure Properties - Development Environment
+# All values must be encrypted using the secure properties tool
+# Format: ![encrypted_value]
+# Encryption: AES/CBC with secure.key
+
+netsuite:
+  credentials:
+    accountId: "![dev_encrypted_account_id]"
+    consumerKey: "![dev_encrypted_consumer_key]"
+    consumerSecret: "![dev_encrypted_consumer_secret]"
+    tokenId: "![dev_encrypted_token_id]"
+    tokenSecret: "![dev_encrypted_token_secret]"
+
+salesforce:
+  credentials:
+    clientId: "![dev_encrypted_client_id]"
+    clientSecret: "![dev_encrypted_client_secret]"
+    username: "![dev_encrypted_username]"
+    password: "![dev_encrypted_password]"
+    securityToken: "![dev_encrypted_security_token]"
+
+anypoint:
+  platform:
+    clientId: "![dev_encrypted_anypoint_client_id]"
+    clientSecret: "![dev_encrypted_anypoint_client_secret]"

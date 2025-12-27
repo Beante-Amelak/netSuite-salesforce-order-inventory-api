@@ -1,0 +1,41 @@
+# Application Configuration - Base
+# Environment-specific values are overridden in application-{env}.yaml
+
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8081"
+    basePath: "/api/v1"
+  request:
+    timeout: "30000"
+    retryCount: "3"
+    retryInterval: "2000"
+
+api:
+  id: "${api.id}"
+  name: "netsuite-salesforce-order-inventory-api"
+  version: "v1"
+
+netsuite:
+  api:
+    host: "${netsuite.api.host}"
+    port: "443"
+    basePath: "/rest/v1"
+    protocol: "HTTPS"
+
+salesforce:
+  api:
+    host: "${salesforce.api.host}"
+    port: "443"
+    basePath: "/services/data/v58.0"
+    protocol: "HTTPS"
+
+objectstore:
+  idMapping:
+    entryTtl: "24"
+    entryTtlUnit: "HOURS"
+    maxEntries: "10000"
+
+logging:
+  level: "INFO"
+  maskFields: "password,secret,token,authorization"

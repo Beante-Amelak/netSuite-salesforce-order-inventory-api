@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <munit:config name="orders-test-suite.xml"/>
+
+    <!-- ============================================== -->
+    <!-- TEST: Create Order - Success                   -->
+    <!-- ============================================== -->
+    <munit:test name="create-order-success-test" 
+        doc:name="Test Create Order Success" 
+        description="Test successful order creation in NetSuite">
+        
+        <munit:behavior>
+            <!-- Mock NetSuite HTTP Request -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Create Order in NetSuite"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value='#[{"internalId": "NS-ORD-12345", "status": "PENDING_FULFILLMENT"}]' mediaType="application/json"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <!-- Mock Object Store operations -->
+            <munit-tools:mock-when processor="os:contains">
+                <munit-tools:then-return>
+                    <munit-tools:variables>
+                        <munit-tools:variable key="isDuplicate" value="#[false]"/>
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <munit-tools:mock-when processor="os:store">
+                <munit-tools:then-return/>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Order Payload">
+                <munit:payload value='#[%dw 2.0
+output application/json
+---
+{
+    "orderId": "ORD-001",
+    "salesforceOrderId": "SF-ORD-001",
+    "customerId": "CUST-001",
+    "orderDate": "2025-01-15T10:00:00Z",
+    "status": "CONFIRMED",
+    "currency": "USD",
+    "totalAmount": 1500.00,
+    "items": [
+        {
+            "productCode": "PROD-001",
+            "quantity": 2,
+            "unitPrice": 750.00
+        }
+    ],
+    "shippingAddress": {
+        "street": "123 Main St",
+        "city": "San Francisco",
+        "state": "CA",
+        "postalCode": "94102",
+        "country": "USA"
+    },
+    "billingAddress": {
+        "street": "123 Main St",
+        "city": "San Francisco",
+        "state": "CA",
+        "postalCode": "94102",
+        "country": "USA"
+    }
+}]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="create-order-impl" doc:name="Call Create Order"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.netsuiteOrderId]" is="#[MunitTools::notNullValue()]" message="NetSuite Order ID should not be null"/>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('CREATED')]" message="Status should be CREATED"/>
+            <munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('201')]" message="HTTP Status should be 201"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Create Order - Duplicate                 -->
+    <!-- ============================================== -->
+    <munit:test name="create-order-duplicate-test" 
+        doc:name="Test Create Order Duplicate" 
+        description="Test duplicate order handling">
+        
+        <munit:behavior>
+            <!-- Mock Object Store - Order exists -->
+            <munit-tools:mock-when processor="os:contains">
+                <munit-tools:then-return>
+                    <munit-tools:variables>
+                        <munit-tools:variable key="isDuplicate" value="#[true]"/>
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <munit-tools:mock-when processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:variables>
+                        <munit-tools:variable key="netsuiteOrderId" value="NS-ORD-EXISTING"/>
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Order Payload">
+                <munit:payload value='#[%dw 2.0
+output application/json
+---
+{
+    "orderId": "ORD-001",
+    "salesforceOrderId": "SF-ORD-001",
+    "customerId": "CUST-001",
+    "orderDate": "2025-01-15T10:00:00Z",
+    "status": "CONFIRMED",
+    "currency": "USD",
+    "totalAmount": 1500.00,
+    "items": [],
+    "shippingAddress": {
+        "street": "123 Main St",
+        "city": "San Francisco",
+        "state": "CA",
+        "postalCode": "94102",
+        "country": "USA"
+    },
+    "billingAddress": {
+        "street": "123 Main St",
+        "city": "San Francisco",
+        "state": "CA",
+        "postalCode": "94102",
+        "country": "USA"
+    }
+}]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="create-order-impl" doc:name="Call Create Order"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('ALREADY_EXISTS')]" message="Status should be ALREADY_EXISTS"/>
+            <munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('200')]" message="HTTP Status should be 200"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Get Order Status - Success               -->
+    <!-- ============================================== -->
+    <munit:test name="get-order-status-success-test" 
+        doc:name="Test Get Order Status Success" 
+        description="Test successful order status retrieval">
+        
+        <munit:behavior>
+            <!-- Mock NetSuite HTTP Request -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Get Order from NetSuite"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value='#[%dw 2.0
+output application/json
+---
+{
+    "internalId": "NS-ORD-12345",
+    "externalId": "SF-ORD-001",
+    "entity": {"internalId": "CUST-001"},
+    "tranDate": "2025-01-15",
+    "status": "SHIPPED",
+    "currency": {"name": "USD"},
+    "total": 1500.00,
+    "itemList": {
+        "item": [
+            {
+                "item": {"internalId": "PROD-001"},
+                "quantity": 2,
+                "rate": 750.00
+            }
+        ]
+    },
+    "shippingAddress": {
+        "addr1": "123 Main St",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94102",
+        "country": "USA"
+    },
+    "billingAddress": {
+        "addr1": "123 Main St",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94102",
+        "country": "USA"
+    }
+}]' mediaType="application/json"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Request Attributes">
+                <munit:payload value="#[null]"/>
+                <munit:attributes value="#[{uriParams: {orderId: 'NS-ORD-12345'}}]"/>
+            </munit:set-event>
+            <flow-ref name="get-order-status-impl" doc:name="Call Get Order Status"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.orderId]" is="#[MunitTools::equalTo('NS-ORD-12345')]" message="Order ID should match"/>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('SHIPPED')]" message="Status should be SHIPPED"/>
+            <munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('200')]" message="HTTP Status should be 200"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Get Order Status - Not Found             -->
+    <!-- ============================================== -->
+    <munit:test name="get-order-status-not-found-test" 
+        doc:name="Test Get Order Status Not Found" 
+        description="Test order not found scenario"
+        expectedErrorType="HTTP:NOT_FOUND">
+        
+        <munit:behavior>
+            <!-- Mock NetSuite HTTP Request - Not Found -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Get Order from NetSuite"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:NOT_FOUND"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Request Attributes">
+                <munit:payload value="#[null]"/>
+                <munit:attributes value="#[{uriParams: {orderId: 'NON-EXISTENT-ORDER'}}]"/>
+            </munit:set-event>
+            <flow-ref name="get-order-status-impl" doc:name="Call Get Order Status"/>
+        </munit:execution>
+    </munit:test>
+
+</mule>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ============================================== -->
+    <!-- CLIENT ID ENFORCEMENT SUB-FLOW                 -->
+    <!-- Validates client_id and client_secret headers  -->
+    <!-- Note: In production, use API Manager policies  -->
+    <!-- This is a fallback for local development       -->
+    <!-- ============================================== -->
+    <sub-flow name="validate-client-credentials" doc:name="Validate Client Credentials">
+        <logger level="DEBUG" doc:name="Log Validation Start" 
+            message="#['Validating client credentials | CorrelationId: ' ++ correlationId]"/>
+        
+        <!-- Extract client credentials from headers -->
+        <set-variable variableName="clientId" 
+            value="#[attributes.headers.'client_id' default '']" 
+            doc:name="Extract Client ID"/>
+        <set-variable variableName="clientSecret" 
+            value="#[attributes.headers.'client_secret' default '']" 
+            doc:name="Extract Client Secret"/>
+        
+        <!-- Validate credentials are present -->
+        <choice doc:name="Check Credentials Present">
+            <when expression="#[isEmpty(vars.clientId) or isEmpty(vars.clientSecret)]">
+                <logger level="WARN" doc:name="Log Missing Credentials" 
+                    message="#['Missing client credentials | CorrelationId: ' ++ correlationId]"/>
+                <raise-error type="CLIENT-SECURITY:UNAUTHORIZED" 
+                    description="Missing client_id or client_secret header"/>
+            </when>
+            <otherwise>
+                <logger level="DEBUG" doc:name="Log Credentials Present" 
+                    message="#['Client credentials present | CorrelationId: ' ++ correlationId]"/>
+            </otherwise>
+        </choice>
+    </sub-flow>
+
+    <!-- ============================================== -->
+    <!-- CORRELATION ID MANAGEMENT                      -->
+    <!-- ============================================== -->
+    <sub-flow name="set-correlation-id" doc:name="Set Correlation ID">
+        <choice doc:name="Check X-Correlation-Id Header">
+            <when expression="#[!isEmpty(attributes.headers.'X-Correlation-Id')]">
+                <set-variable variableName="correlationIdHeader" 
+                    value="#[attributes.headers.'X-Correlation-Id']" 
+                    doc:name="Use Provided Correlation ID"/>
+            </when>
+            <otherwise>
+                <set-variable variableName="correlationIdHeader" 
+                    value="#[correlationId]" 
+                    doc:name="Generate Correlation ID"/>
+            </otherwise>
+        </choice>
+        
+        <!-- Add to outbound headers -->
+        <set-variable variableName="outboundHeaders" 
+            value="#[(vars.outboundHeaders default {}) ++ {'X-Correlation-Id': vars.correlationIdHeader}]" 
+            doc:name="Add to Outbound Headers"/>
+    </sub-flow>
+
+</mule>

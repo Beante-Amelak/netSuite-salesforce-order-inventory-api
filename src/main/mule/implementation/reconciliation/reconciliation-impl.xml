@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!-- ============================================== -->
+    <!-- INVENTORY RECONCILIATION SUB-FLOW              -->
+    <!-- Reconcile inventory between NetSuite and SF    -->
+    <!-- ============================================== -->
+    <sub-flow name="reconcile-inventory" doc:name="Reconcile Inventory">
+        <logger level="INFO" doc:name="Log Start" 
+            message="#['RECONCILIATION | Start | CorrelationId: ' ++ correlationId]"/>
+        
+        <!-- Get inventory from NetSuite -->
+        <set-variable variableName="targetSystem" value="NetSuite" doc:name="Set Target System"/>
+        <set-variable variableName="operation" value="GetInventoryForReconciliation" doc:name="Set Operation"/>
+        <flow-ref name="log-external-call-start" doc:name="Log Call Start"/>
+        
+        <try doc:name="Try Get NetSuite Inventory">
+            <http:request method="GET" 
+                config-ref="HTTP_Request_Config_NetSuite" 
+                path="${netsuite.api.basePath}/inventoryItem"
+                doc:name="Get All Inventory from NetSuite">
+                <http:headers><![CDATA[#[{
+                    "Accept": "application/json",
+                    "Authorization": "Bearer " ++ p('secure::netsuite.credentials.tokenSecret'),
+                    "X-Correlation-Id": correlationId
+                }]]]></http:headers>
+            </http:request>
+            
+            <set-variable variableName="netsuiteInventory" value="#[payload]" doc:name="Store NetSuite Inventory"/>
+            <set-variable variableName="callStatus" value="SUCCESS" doc:name="Set Call Status"/>
+            
+            <error-handler>
+                <on-error-continue type="ANY">
+                    <set-variable variableName="netsuiteInventory" value="#[[]]" doc:name="Set Empty Inventory"/>
+                    <set-variable variableName="callStatus" value="FAILED" doc:name="Set Call Status"/>
+                    <logger level="ERROR" doc:name="Log Error" 
+                        message="#['RECONCILIATION | Failed to get NetSuite inventory | Error: ' ++ (error.description default 'Unknown') ++ ' | CorrelationId: ' ++ correlationId]"/>
+                </on-error-continue>
+            </error-handler>
+        </try>
+        
+        <flow-ref name="log-external-call-end" doc:name="Log Call End"/>
+        
+        <!-- Transform and sync to Salesforce -->
+        <choice doc:name="Has Inventory to Sync?">
+            <when expression="#[!isEmpty(vars.netsuiteInventory)]">
+                <ee:transform doc:name="Transform for Salesforce">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var items = if (vars.netsuiteInventory is Array) vars.netsuiteInventory else [vars.netsuiteInventory]
+---
+items map (item) -> {
+    productCode: item.itemId default item.internalId default "",
+    location: item.location.name default item.locationId default "",
+    availableQuantity: item.quantityAvailable default item.quantity default 0,
+    lastUpdated: item.lastModifiedDate default now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+                
+                <!-- Call sync inventory flow -->
+                <flow-ref name="sync-inventory-impl" doc:name="Sync to Salesforce"/>
+            </when>
+            <otherwise>
+                <logger level="WARN" doc:name="Log No Inventory" 
+                    message="#['RECONCILIATION | No inventory to sync | CorrelationId: ' ++ correlationId]"/>
+            </otherwise>
+        </choice>
+        
+        <logger level="INFO" doc:name="Log End" 
+            message="#['RECONCILIATION | End | CorrelationId: ' ++ correlationId]"/>
+    </sub-flow>
+
+    <!-- ============================================== -->
+    <!-- ORDER STATUS SYNC SUB-FLOW                     -->
+    <!-- Sync order status from NetSuite to Salesforce  -->
+    <!-- ============================================== -->
+    <sub-flow name="sync-order-status" doc:name="Sync Order Status">
+        <logger level="INFO" doc:name="Log Start" 
+            message="#['ORDER STATUS SYNC | Start | OrderId: ' ++ (vars.orderId default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId]"/>
+        
+        <!-- Get order from NetSuite -->
+        <set-variable variableName="targetSystem" value="NetSuite" doc:name="Set Target System"/>
+        <set-variable variableName="operation" value="GetOrderForStatusSync" doc:name="Set Operation"/>
+        <flow-ref name="log-external-call-start" doc:name="Log Call Start"/>
+        
+        <try doc:name="Try Get NetSuite Order">
+            <http:request method="GET" 
+                config-ref="HTTP_Request_Config_NetSuite" 
+                path="#['${netsuite.api.basePath}/salesOrder/' ++ vars.orderId]"
+                doc:name="Get Order from NetSuite">
+                <http:headers><![CDATA[#[{
+                    "Accept": "application/json",
+                    "Authorization": "Bearer " ++ p('secure::netsuite.credentials.tokenSecret'),
+                    "X-Correlation-Id": correlationId
+                }]]]></http:headers>
+            </http:request>
+            
+            <set-variable variableName="netsuiteOrder" value="#[payload]" doc:name="Store NetSuite Order"/>
+            <set-variable variableName="callStatus" value="SUCCESS" doc:name="Set Call Status"/>
+            
+            <error-handler>
+                <on-error-continue type="ANY">
+                    <set-variable variableName="netsuiteOrder" value="#[null]" doc:name="Set Null Order"/>
+                    <set-variable variableName="callStatus" value="FAILED" doc:name="Set Call Status"/>
+                    <logger level="ERROR" doc:name="Log Error" 
+                        message="#['ORDER STATUS SYNC | Failed to get NetSuite order | Error: ' ++ (error.description default 'Unknown') ++ ' | CorrelationId: ' ++ correlationId]"/>
+                </on-error-continue>
+            </error-handler>
+        </try>
+        
+        <flow-ref name="log-external-call-end" doc:name="Log Call End"/>
+        
+        <!-- Update Salesforce if order found -->
+        <choice doc:name="Has Order?">
+            <when expression="#[vars.netsuiteOrder != null]">
+                <set-variable variableName="targetSystem" value="Salesforce" doc:name="Set Target System"/>
+                <set-variable variableName="operation" value="UpdateOrderStatus" doc:name="Set Operation"/>
+                <flow-ref name="log-external-call-start" doc:name="Log Call Start"/>
+                
+                <ee:transform doc:name="Transform for Salesforce Update">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    Status: vars.netsuiteOrder.status default "UNKNOWN",
+    NetSuite_Order_Id__c: vars.netsuiteOrder.internalId default vars.netsuiteOrder.id,
+    Last_Sync_Date__c: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+                
+                <try doc:name="Try Update Salesforce">
+                    <http:request method="PATCH" 
+                        config-ref="HTTP_Request_Config_Salesforce" 
+                        path="#['${salesforce.api.basePath}/sobjects/Order/' ++ vars.netsuiteOrder.externalId]"
+                        doc:name="Update Order in Salesforce">
+                        <http:headers><![CDATA[#[{
+                            "Content-Type": "application/json",
+                            "Authorization": "Bearer " ++ p('secure::salesforce.credentials.securityToken'),
+                            "X-Correlation-Id": correlationId
+                        }]]]></http:headers>
+                    </http:request>
+                    
+                    <set-variable variableName="callStatus" value="SUCCESS" doc:name="Set Call Status"/>
+                    
+                    <error-handler>
+                        <on-error-continue type="ANY">
+                            <set-variable variableName="callStatus" value="FAILED" doc:name="Set Call Status"/>
+                            <logger level="ERROR" doc:name="Log Error" 
+                                message="#['ORDER STATUS SYNC | Failed to update Salesforce | Error: ' ++ (error.description default 'Unknown') ++ ' | CorrelationId: ' ++ correlationId]"/>
+                        </on-error-continue>
+                    </error-handler>
+                </try>
+                
+                <flow-ref name="log-external-call-end" doc:name="Log Call End"/>
+            </when>
+            <otherwise>
+                <logger level="WARN" doc:name="Log No Order" 
+                    message="#['ORDER STATUS SYNC | Order not found in NetSuite | OrderId: ' ++ (vars.orderId default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId]"/>
+            </otherwise>
+        </choice>
+        
+        <logger level="INFO" doc:name="Log End" 
+            message="#['ORDER STATUS SYNC | End | CorrelationId: ' ++ correlationId]"/>
+    </sub-flow>
+
+</mule>

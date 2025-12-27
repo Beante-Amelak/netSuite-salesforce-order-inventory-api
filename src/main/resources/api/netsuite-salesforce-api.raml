@@ -1,0 +1,193 @@
+#%RAML 1.0
+title: netSuite-salesforce-order-inventory-api
+version: v1
+baseUri: /api/v1
+mediaType: application/json
+
+protocols:
+  - HTTPS
+
+securitySchemes:
+  client-id-enforcement:
+    type: x-client-id-enforcement
+    describedBy:
+      headers:
+        client_id:
+          type: string
+          required: true
+        client_secret:
+          type: string
+          required: true
+      responses:
+        401:
+          description: Unauthorized
+
+securedBy:
+  - client-id-enforcement
+
+traits:
+  correlationId:
+    headers:
+      X-Correlation-Id:
+        type: string
+        required: false
+    responses:
+      500:
+        body:
+          application/json:
+            example:
+              errorCode: "INTERNAL_ERROR"
+              message: "Unexpected error"
+              correlationId: "UUID"
+              timestamp: "2025-01-01T12:00:00Z"
+
+types:
+
+  ErrorResponse:
+    type: object
+    properties:
+      errorCode: string
+      message: string
+      correlationId: string
+      timestamp: datetime
+
+  Order:
+    type: object
+    properties:
+      orderId: string
+      salesforceOrderId: string
+      customerId: string
+      orderDate: datetime
+      status: string
+      currency: string
+      totalAmount: number
+      items: OrderItem[]
+      shippingAddress: Address
+      billingAddress: Address
+
+  OrderItem:
+    type: object
+    properties:
+      productCode: string
+      quantity: integer
+      unitPrice: number
+
+  Address:
+    type: object
+    properties:
+      street: string
+      city: string
+      state: string
+      postalCode: string
+      country: string
+
+  OrderResponse:
+    type: object
+    properties:
+      netsuiteOrderId: string
+      status: string
+      message: string
+
+  InventoryItem:
+    type: object
+    properties:
+      productCode: string
+      location: string
+      availableQuantity: integer
+      lastUpdated: datetime
+
+  InventoryUpdateResponse:
+    type: object
+    properties:
+      updated: boolean
+      processedAt: datetime
+
+/orders:
+  post:
+    is: [correlationId]
+    description: |
+      Create an order in NetSuite from Salesforce.
+      Triggered when an order is placed or confirmed in Salesforce.
+    body:
+      application/json:
+        type: Order
+    responses:
+      201:
+        body:
+          application/json:
+            type: OrderResponse
+      400:
+        body:
+          application/json:
+            type: ErrorResponse
+      500:
+        body:
+          application/json:
+            type: ErrorResponse
+
+/orders/{orderId}:
+  get:
+    is: [correlationId]
+    description: Retrieve order status from NetSuite for Salesforce visibility.
+    responses:
+      200:
+        body:
+          application/json:
+            type: Order
+      404:
+        body:
+          application/json:
+            type: ErrorResponse
+
+/inventory:
+  get:
+    is: [correlationId]
+    description: Retrieve inventory levels from NetSuite.
+    queryParameters:
+      productCode:
+        required: false
+      location:
+        required: false
+    responses:
+      200:
+        body:
+          application/json:
+            type: InventoryItem[]
+      500:
+        body:
+          application/json:
+            type: ErrorResponse
+
+/inventory/sync:
+  post:
+    is: [correlationId]
+    description: |
+      Push inventory updates from NetSuite to Salesforce
+      to keep product catalog quantities in sync.
+    body:
+      application/json:
+        type: InventoryItem[]
+    responses:
+      200:
+        body:
+          application/json:
+            type: InventoryUpdateResponse
+      400:
+        body:
+          application/json:
+            type: ErrorResponse
+      500:
+        body:
+          application/json:
+            type: ErrorResponse
+
+/health:
+  get:
+    description: API health check.
+    responses:
+      200:
+        body:
+          application/json:
+            example:
+              status: "UP"
+              timestamp: "2025-01-01T12:00:00Z"

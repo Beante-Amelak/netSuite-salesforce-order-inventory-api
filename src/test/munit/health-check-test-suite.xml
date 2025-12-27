@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+    <munit:config name="health-check-test-suite.xml"/>
+
+    <!-- ============================================== -->
+    <!-- TEST: Health Check - Success                   -->
+    <!-- ============================================== -->
+    <munit:test name="health-check-success-test" 
+        doc:name="Test Health Check Success" 
+        description="Test successful health check response">
+        
+        <munit:execution>
+            <flow-ref name="health-check-impl" doc:name="Call Health Check"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('UP')]" message="Status should be UP"/>
+            <munit-tools:assert-that expression="#[payload.timestamp]" is="#[MunitTools::notNullValue()]" message="Timestamp should not be null"/>
+            <munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('200')]" message="HTTP Status should be 200"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Health Check - Response Format           -->
+    <!-- ============================================== -->
+    <munit:test name="health-check-response-format-test" 
+        doc:name="Test Health Check Response Format" 
+        description="Test health check response contains all required fields">
+        
+        <munit:execution>
+            <flow-ref name="health-check-impl" doc:name="Call Health Check"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::notNullValue()]" message="Status field should exist"/>
+            <munit-tools:assert-that expression="#[payload.timestamp]" is="#[MunitTools::notNullValue()]" message="Timestamp field should exist"/>
+            <munit-tools:assert-that expression="#[payload.timestamp]" is="#[MunitTools::containsString('T')]" message="Timestamp should be ISO format"/>
+        </munit:validation>
+    </munit:test>
+
+</mule>

@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <munit:config name="inventory-test-suite.xml"/>
+
+    <!-- ============================================== -->
+    <!-- TEST: Get Inventory - Success                  -->
+    <!-- ============================================== -->
+    <munit:test name="get-inventory-success-test" 
+        doc:name="Test Get Inventory Success" 
+        description="Test successful inventory retrieval from NetSuite">
+        
+        <munit:behavior>
+            <!-- Mock NetSuite HTTP Request -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Get Inventory from NetSuite"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value='#[%dw 2.0
+output application/json
+---
+[
+    {
+        "itemId": "PROD-001",
+        "location": {"name": "Warehouse-A"},
+        "quantityAvailable": 100,
+        "lastModifiedDate": "2025-01-15T10:00:00Z"
+    },
+    {
+        "itemId": "PROD-002",
+        "location": {"name": "Warehouse-B"},
+        "quantityAvailable": 50,
+        "lastModifiedDate": "2025-01-15T11:00:00Z"
+    }
+]]' mediaType="application/json"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Request Attributes">
+                <munit:payload value="#[null]"/>
+                <munit:attributes value="#[{queryParams: {}}]"/>
+            </munit:set-event>
+            <flow-ref name="get-inventory-impl" doc:name="Call Get Inventory"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[sizeOf(payload)]" is="#[MunitTools::equalTo(2)]" message="Should return 2 inventory items"/>
+            <munit-tools:assert-that expression="#[payload[0].productCode]" is="#[MunitTools::equalTo('PROD-001')]" message="First product code should match"/>
+            <munit-tools:assert-that expression="#[payload[0].availableQuantity]" is="#[MunitTools::equalTo(100)]" message="First product quantity should be 100"/>
+            <munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('200')]" message="HTTP Status should be 200"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Get Inventory - With Filters             -->
+    <!-- ============================================== -->
+    <munit:test name="get-inventory-with-filters-test" 
+        doc:name="Test Get Inventory With Filters" 
+        description="Test inventory retrieval with product code and location filters">
+        
+        <munit:behavior>
+            <!-- Mock NetSuite HTTP Request -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Get Inventory from NetSuite"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value='#[%dw 2.0
+output application/json
+---
+{
+    "itemId": "PROD-001",
+    "location": {"name": "Warehouse-A"},
+    "quantityAvailable": 100,
+    "lastModifiedDate": "2025-01-15T10:00:00Z"
+}]' mediaType="application/json"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Request Attributes">
+                <munit:payload value="#[null]"/>
+                <munit:attributes value="#[{queryParams: {productCode: 'PROD-001', location: 'Warehouse-A'}}]"/>
+            </munit:set-event>
+            <flow-ref name="get-inventory-impl" doc:name="Call Get Inventory"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[sizeOf(payload)]" is="#[MunitTools::equalTo(1)]" message="Should return 1 inventory item"/>
+            <munit-tools:assert-that expression="#[payload[0].productCode]" is="#[MunitTools::equalTo('PROD-001')]" message="Product code should match filter"/>
+            <munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('200')]" message="HTTP Status should be 200"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Sync Inventory - Success                 -->
+    <!-- ============================================== -->
+    <munit:test name="sync-inventory-success-test" 
+        doc:name="Test Sync Inventory Success" 
+        description="Test successful inventory sync to Salesforce">
+        
+        <munit:behavior>
+            <!-- Mock Salesforce HTTP Request -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Update Inventory in Salesforce"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value='#[{"success": true}]' mediaType="application/json"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Inventory Payload">
+                <munit:payload value='#[%dw 2.0
+output application/json
+---
+[
+    {
+        "productCode": "PROD-001",
+        "location": "Warehouse-A",
+        "availableQuantity": 100,
+        "lastUpdated": "2025-01-15T10:00:00Z"
+    },
+    {
+        "productCode": "PROD-002",
+        "location": "Warehouse-B",
+        "availableQuantity": 50,
+        "lastUpdated": "2025-01-15T11:00:00Z"
+    }
+]]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="sync-inventory-impl" doc:name="Call Sync Inventory"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.updated]" is="#[MunitTools::equalTo(true)]" message="Updated should be true"/>
+            <munit-tools:assert-that expression="#[payload.processedAt]" is="#[MunitTools::notNullValue()]" message="ProcessedAt should not be null"/>
+            <munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('200')]" message="HTTP Status should be 200"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Sync Inventory - Bad Request             -->
+    <!-- ============================================== -->
+    <munit:test name="sync-inventory-bad-request-test" 
+        doc:name="Test Sync Inventory Bad Request" 
+        description="Test inventory sync with invalid data"
+        expectedErrorType="HTTP:BAD_REQUEST">
+        
+        <munit:behavior>
+            <!-- Mock Salesforce HTTP Request - Bad Request -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Update Inventory in Salesforce"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:BAD_REQUEST" exception="#[java!java::lang::RuntimeException::new('Invalid data')]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Invalid Inventory Payload">
+                <munit:payload value='#[%dw 2.0
+output application/json
+---
+[
+    {
+        "productCode": "",
+        "location": "",
+        "availableQuantity": -1,
+        "lastUpdated": "invalid-date"
+    }
+]]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="sync-inventory-impl" doc:name="Call Sync Inventory"/>
+        </munit:execution>
+    </munit:test>
+
+    <!-- ============================================== -->
+    <!-- TEST: Get Inventory - Server Error             -->
+    <!-- ============================================== -->
+    <munit:test name="get-inventory-server-error-test" 
+        doc:name="Test Get Inventory Server Error" 
+        description="Test inventory retrieval when NetSuite is unavailable"
+        expectedErrorType="ANY">
+        
+        <munit:behavior>
+            <!-- Mock NetSuite HTTP Request - Server Error -->
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Get Inventory from NetSuite"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Request Attributes">
+                <munit:payload value="#[null]"/>
+                <munit:attributes value="#[{queryParams: {}}]"/>
+            </munit:set-event>
+            <flow-ref name="get-inventory-impl" doc:name="Call Get Inventory"/>
+        </munit:execution>
+    </munit:test>
+
+</mule>

@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway"
+      xmlns:tls="http://www.mulesoft.org/schema/mule/tls"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+        http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
+        http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd">
+
+    <!-- ============================================== -->
+    <!-- GLOBAL PROPERTIES                              -->
+    <!-- ============================================== -->
+    <global-property doc:name="Environment" name="mule.env" value="${mule.env}"/>
+    <global-property doc:name="Secure Key" name="secure.key" value="${secure.key}"/>
+
+    <!-- ============================================== -->
+    <!-- CONFIGURATION PROPERTIES                       -->
+    <!-- ============================================== -->
+    <configuration-properties doc:name="Application Properties" file="config/application-${mule.env}.yaml"/>
+    
+    <secure-properties:config name="Secure_Properties_Config" 
+        doc:name="Secure Properties Config" 
+        file="config/secure-properties-${mule.env}.yaml" 
+        key="${secure.key}">
+        <secure-properties:encrypt algorithm="AES" mode="CBC"/>
+    </secure-properties:config>
+
+    <!-- ============================================== -->
+    <!-- GLOBAL ERROR HANDLER REFERENCE                 -->
+    <!-- ============================================== -->
+    <configuration defaultErrorHandler-ref="global-error-handler"/>
+
+    <!-- ============================================== -->
+    <!-- HTTP LISTENER CONFIGURATION                    -->
+    <!-- ============================================== -->
+    <http:listener-config name="HTTP_Listener_Config" doc:name="HTTP Listener Config">
+        <http:listener-connection host="${http.listener.host}" port="${http.listener.port}"/>
+    </http:listener-config>
+
+    <!-- ============================================== -->
+    <!-- HTTP REQUEST CONFIGURATION - NETSUITE          -->
+    <!-- ============================================== -->
+    <http:request-config name="HTTP_Request_Config_NetSuite" 
+        doc:name="HTTP Request Config NetSuite"
+        responseTimeout="${http.request.timeout}">
+        <http:request-connection host="${netsuite.api.host}" 
+            port="${netsuite.api.port}" 
+            protocol="HTTPS">
+            <reconnection>
+                <reconnect frequency="${http.request.retryInterval}" count="${http.request.retryCount}"/>
+            </reconnection>
+            <tls:context>
+                <tls:trust-store insecure="true"/>
+            </tls:context>
+        </http:request-connection>
+    </http:request-config>
+
+    <!-- ============================================== -->
+    <!-- HTTP REQUEST CONFIGURATION - SALESFORCE        -->
+    <!-- ============================================== -->
+    <http:request-config name="HTTP_Request_Config_Salesforce" 
+        doc:name="HTTP Request Config Salesforce"
+        responseTimeout="${http.request.timeout}">
+        <http:request-connection host="${salesforce.api.host}" 
+            port="${salesforce.api.port}" 
+            protocol="HTTPS">
+            <reconnection>
+                <reconnect frequency="${http.request.retryInterval}" count="${http.request.retryCount}"/>
+            </reconnection>
+            <tls:context>
+                <tls:trust-store insecure="true"/>
+            </tls:context>
+        </http:request-connection>
+    </http:request-config>
+
+    <!-- ============================================== -->
+    <!-- APIKIT CONFIGURATION                           -->
+    <!-- ============================================== -->
+    <apikit:config name="netsuite-salesforce-api-config" 
+        doc:name="APIKit Config" 
+        api="api/netsuite-salesforce-api.raml" 
+        outboundHeadersMapName="outboundHeaders" 
+        httpStatusVarName="httpStatus"/>
+
+    <!-- ============================================== -->
+    <!-- OBJECT STORE - ID MAPPING                      -->
+    <!-- ============================================== -->
+    <os:object-store name="Order_ID_Mapping_Store" 
+        doc:name="Order ID Mapping Store"
+        persistent="true" 
+        maxEntries="${objectstore.idMapping.maxEntries}"
+        entryTtl="${objectstore.idMapping.entryTtl}"
+        entryTtlUnit="HOURS"/>
+
+    <!-- ============================================== -->
+    <!-- OBJECT STORE - IDEMPOTENCY                     -->
+    <!-- ============================================== -->
+    <os:object-store name="Idempotency_Store" 
+        doc:name="Idempotency Store"
+        persistent="true" 
+        maxEntries="10000"
+        entryTtl="24"
+        entryTtlUnit="HOURS"/>
+
+    <!-- ============================================== -->
+    <!-- OBJECT STORE - INVENTORY CACHE                 -->
+    <!-- ============================================== -->
+    <os:object-store name="Inventory_Cache_Store" 
+        doc:name="Inventory Cache Store"
+        persistent="false" 
+        maxEntries="5000"
+        entryTtl="1"
+        entryTtlUnit="HOURS"/>
+
+    <!-- ============================================== -->
+    <!-- API AUTODISCOVERY                              -->
+    <!-- ============================================== -->
+    <api-gateway:autodiscovery 
+        doc:name="API Autodiscovery" 
+        apiId="${api.id}" 
+        ignoreBasePath="true" 
+        flowRef="api-main"/>
+
+</mule>

@@ -1,0 +1,24 @@
+# Secure Properties - Base Template
+# All values must be encrypted using the secure properties tool
+# Format: ![encrypted_value]
+
+netsuite:
+  credentials:
+    accountId: "![encrypted_account_id]"
+    consumerKey: "![encrypted_consumer_key]"
+    consumerSecret: "![encrypted_consumer_secret]"
+    tokenId: "![encrypted_token_id]"
+    tokenSecret: "![encrypted_token_secret]"
+
+salesforce:
+  credentials:
+    clientId: "![encrypted_client_id]"
+    clientSecret: "![encrypted_client_secret]"
+    username: "![encrypted_username]"
+    password: "![encrypted_password]"
+    securityToken: "![encrypted_security_token]"
+
+anypoint:
+  platform:
+    clientId: "![encrypted_anypoint_client_id]"
+    clientSecret: "![encrypted_anypoint_client_secret]"

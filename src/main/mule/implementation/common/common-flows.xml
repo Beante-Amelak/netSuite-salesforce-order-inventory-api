@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!-- ============================================== -->
+    <!-- LOGGING SUB-FLOWS                              -->
+    <!-- ============================================== -->
+    
+    <!-- Log Inbound Request -->
+    <sub-flow name="log-inbound-request" doc:name="Log Inbound Request">
+        <logger level="INFO" doc:name="Log Request" 
+            message="#['INBOUND REQUEST | Method: ' ++ (attributes.method default 'UNKNOWN') ++ ' | Path: ' ++ (attributes.requestPath default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </sub-flow>
+
+    <!-- Log Outbound Response -->
+    <sub-flow name="log-outbound-response" doc:name="Log Outbound Response">
+        <logger level="INFO" doc:name="Log Response" 
+            message="#['OUTBOUND RESPONSE | Status: ' ++ (vars.httpStatus default '200') ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </sub-flow>
+
+    <!-- Log External Call Start -->
+    <sub-flow name="log-external-call-start" doc:name="Log External Call Start">
+        <logger level="INFO" doc:name="Log Call Start" 
+            message="#['EXTERNAL CALL START | System: ' ++ (vars.targetSystem default 'UNKNOWN') ++ ' | Operation: ' ++ (vars.operation default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </sub-flow>
+
+    <!-- Log External Call End -->
+    <sub-flow name="log-external-call-end" doc:name="Log External Call End">
+        <logger level="INFO" doc:name="Log Call End" 
+            message="#['EXTERNAL CALL END | System: ' ++ (vars.targetSystem default 'UNKNOWN') ++ ' | Operation: ' ++ (vars.operation default 'UNKNOWN') ++ ' | Status: ' ++ (vars.callStatus default 'UNKNOWN') ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </sub-flow>
+
+    <!-- ============================================== -->
+    <!-- ID MAPPING UTILITIES                           -->
+    <!-- ============================================== -->
+    
+    <!-- Store Order ID Mapping -->
+    <sub-flow name="store-order-id-mapping" doc:name="Store Order ID Mapping">
+        <os:store key="#[vars.salesforceOrderId]" 
+            objectStore="Order_ID_Mapping_Store" 
+            doc:name="Store Mapping">
+            <os:value><![CDATA[#[vars.netsuiteOrderId]]]></os:value>
+        </os:store>
+        <logger level="DEBUG" doc:name="Log Mapping Stored" 
+            message="#['Order ID mapping stored | SF: ' ++ vars.salesforceOrderId ++ ' -> NS: ' ++ vars.netsuiteOrderId ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </sub-flow>
+
+    <!-- Retrieve Order ID Mapping -->
+    <sub-flow name="retrieve-order-id-mapping" doc:name="Retrieve Order ID Mapping">
+        <os:retrieve key="#[vars.salesforceOrderId]" 
+            objectStore="Order_ID_Mapping_Store" 
+            target="netsuiteOrderId"
+            doc:name="Retrieve Mapping">
+            <os:default-value><![CDATA[#[null]]]></os:default-value>
+        </os:retrieve>
+        <logger level="DEBUG" doc:name="Log Mapping Retrieved" 
+            message="#['Order ID mapping retrieved | SF: ' ++ vars.salesforceOrderId ++ ' -> NS: ' ++ (vars.netsuiteOrderId default 'NOT_FOUND') ++ ' | CorrelationId: ' ++ correlationId]"/>
+    </sub-flow>
+
+    <!-- ============================================== -->
+    <!-- IDEMPOTENCY CHECK                              -->
+    <!-- ============================================== -->
+    
+    <!-- Check Idempotency -->
+    <sub-flow name="check-idempotency" doc:name="Check Idempotency">
+        <os:contains key="#[vars.idempotencyKey]" 
+            objectStore="Idempotency_Store" 
+            target="isDuplicate"
+            doc:name="Check Duplicate"/>
+        <choice doc:name="Is Duplicate?">
+            <when expression="#[vars.isDuplicate]">
+                <logger level="WARN" doc:name="Log Duplicate" 
+                    message="#['Duplicate request detected | Key: ' ++ vars.idempotencyKey ++ ' | CorrelationId: ' ++ correlationId]"/>
+            </when>
+            <otherwise>
+                <os:store key="#[vars.idempotencyKey]" 
+                    objectStore="Idempotency_Store" 
+                    doc:name="Store Idempotency Key">
+                    <os:value><![CDATA[#[now() as String]]]></os:value>
+                </os:store>
+            </otherwise>
+        </choice>
+    </sub-flow>
+
+    <!-- ============================================== -->
+    <!-- INVENTORY CACHE UTILITIES                      -->
+    <!-- ============================================== -->
+    
+    <!-- Cache Inventory -->
+    <sub-flow name="cache-inventory" doc:name="Cache Inventory">
+        <os:store key="#[vars.productCode ++ '_' ++ vars.location]" 
+            objectStore="Inventory_Cache_Store" 
+            doc:name="Cache Inventory">
+            <os:value><![CDATA[#[write(payload, 'application/json')]]]></os:value>
+        </os:store>
+    </sub-flow>
+
+    <!-- Retrieve Cached Inventory -->
+    <sub-flow name="retrieve-cached-inventory" doc:name="Retrieve Cached Inventory">
+        <os:retrieve key="#[vars.productCode ++ '_' ++ vars.location]" 
+            objectStore="Inventory_Cache_Store" 
+            target="cachedInventory"
+            doc:name="Retrieve Cached">
+            <os:default-value><![CDATA[#[null]]]></os:default-value>
+        </os:retrieve>
+    </sub-flow>
+
+</mule>

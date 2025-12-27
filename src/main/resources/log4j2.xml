@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Configuration status="WARN">
+
+    <!-- 
+        NetSuite-Salesforce Order & Inventory Sync API
+        Production-Grade Logging Configuration
+    -->
+
+    <Properties>
+        <Property name="APP_NAME">netsuite-salesforce-api</Property>
+        <Property name="LOG_PATTERN">%-5p %d{yyyy-MM-dd HH:mm:ss.SSS} [%t] [correlationId: %X{correlationId}] [processor: %X{processorPath}] %c{1}: %m%n</Property>
+        <Property name="LOG_PATTERN_JSON">{"timestamp":"%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ}","level":"%p","thread":"%t","correlationId":"%X{correlationId}","processor":"%X{processorPath}","logger":"%c{1}","message":"%m"}%n</Property>
+    </Properties>
+
+    <Appenders>
+        <!-- Rolling File Appender for Application Logs -->
+        <RollingFile name="file" 
+            fileName="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}${APP_NAME}.log"
+            filePattern="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}${APP_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${LOG_PATTERN}"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="50 MB"/>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy max="30">
+                <Delete basePath="${sys:mule.home}${sys:file.separator}logs" maxDepth="1">
+                    <IfFileName glob="${APP_NAME}-*.log.gz"/>
+                    <IfLastModified age="30d"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <!-- Rolling File Appender for Audit Logs -->
+        <RollingFile name="audit" 
+            fileName="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}${APP_NAME}-audit.log"
+            filePattern="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}${APP_NAME}-audit-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${LOG_PATTERN_JSON}"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="100 MB"/>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy max="90"/>
+        </RollingFile>
+
+        <!-- Console Appender -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="${LOG_PATTERN}"/>
+        </Console>
+    </Appenders>
+
+    <Loggers>
+        <!-- HTTP Wire Traffic - WARN in production, DEBUG for troubleshooting -->
+        <AsyncLogger name="org.mule.service.http.impl.service.HttpMessageLogger" level="WARN"/>
+        <AsyncLogger name="org.mule.service.http" level="WARN"/>
+        <AsyncLogger name="org.mule.extension.http" level="WARN"/>
+
+        <!-- APIKit Logging -->
+        <AsyncLogger name="org.mule.module.apikit" level="INFO"/>
+
+        <!-- Object Store Logging -->
+        <AsyncLogger name="org.mule.extension.objectstore" level="WARN"/>
+
+        <!-- Mule Core Logger -->
+        <AsyncLogger name="org.mule.runtime.core.internal.processor.LoggerMessageProcessor" level="INFO"/>
+
+        <!-- Application Specific Loggers -->
+        <AsyncLogger name="com.mycompany.netsuite.salesforce" level="INFO"/>
+
+        <!-- Suppress noisy loggers -->
+        <AsyncLogger name="org.apache.cxf" level="WARN"/>
+        <AsyncLogger name="org.apache.http" level="WARN"/>
+        <AsyncLogger name="org.springframework" level="WARN"/>
+        <AsyncLogger name="org.mule.runtime.core.internal.policy" level="WARN"/>
+
+        <!-- Root Logger -->
+        <AsyncRoot level="INFO">
+            <AppenderRef ref="file"/>
+            <AppenderRef ref="Console"/>
+        </AsyncRoot>
+    </Loggers>
+
+</Configuration>
